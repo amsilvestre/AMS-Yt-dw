@@ -1,0 +1,30 @@
+# ── Rust ─────────────────────────────────────────────────────────────────────
+/target/
+
+# ── Arquivos gerados pelo build ───────────────────────────────────────────────
+# PNG gerado automaticamente pelo build.rs a partir do icon.ico
+assets/icon_window.png
+
+# ── Binários de terceiros (baixar separadamente) ──────────────────────────────
+# ffmpeg.exe  →  https://ffmpeg.org/download.html
+ffmpeg.exe
+# yt-dlp.exe  →  https://github.com/yt-dlp/yt-dlp/releases
+yt-dlp.exe
+
+# ── App compilado ─────────────────────────────────────────────────────────────
+AMS_YT_Downloader.exe
+*.exe.bak
+
+# ── Ferramentas de desenvolvimento ────────────────────────────────────────────
+.claude/
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.suo
+*.user

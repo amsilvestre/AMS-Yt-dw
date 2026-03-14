@@ -1,0 +1,381 @@
+import { Button, LineEdit, ComboBox } from "std-widgets.slint";
+
+// ── Checkbox customizado (texto sempre legível) ────────────────────────────────
+component MyCheck inherits HorizontalLayout {
+    in-out property <bool> checked: false;
+    in property  <string>  text: "";
+    in property  <bool>    enabled: true;
+
+    spacing: 8px;
+    alignment: start;
+
+    Rectangle {
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        border-width: 2px;
+        border-color: root.enabled
+            ? (root.checked ? #3b82f6 : #475569)
+            : #334155;
+        background: root.enabled && root.checked ? #3b82f6 : transparent;
+
+        Text {
+            visible: root.checked;
+            text: "✓";
+            color: white;
+            font-size: 11px;
+            font-weight: 900;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        TouchArea {
+            enabled: root.enabled;
+            width: parent.width;
+            height: parent.height;
+            clicked => { root.checked = !root.checked; }
+        }
+    }
+
+    Text {
+        text: root.text;
+        color: root.enabled ? #e2e8f0 : #475569;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+}
+
+// ── Card de seção ─────────────────────────────────────────────────────────────
+component Card inherits Rectangle {
+    in property <string> title: "";
+
+    background: #1e293b;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #334155;
+
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 12px;
+        spacing: 8px;
+
+        if root.title != "" : Text {
+            text: root.title;
+            color: #60a5fa;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        @children
+    }
+}
+
+// ── Rótulo inline ──────────────────────────────────────────────────────────────
+component Lbl inherits Text {
+    color: #94a3b8;
+    font-size: 13px;
+    vertical-alignment: center;
+}
+
+// ── Janela principal ───────────────────────────────────────────────────────────
+export component AppWindow inherits Window {
+    title: "AMS YouTube Downloader";
+    icon: @image-url("../assets/icon_window.png");
+    preferred-width: 820px;
+    preferred-height: 820px;
+    min-width: 660px;
+    min-height: 620px;
+    background: #0f172a;
+
+    // ── Propriedades ──────────────────────────────────────────────────────────
+    in-out property <string> url;
+    in-out property <string> output-folder;
+    in-out property <string> log-text;
+    in-out property <bool>   is-downloading: false;
+    in-out property <float>  progress: 0.0;
+
+    in-out property <int>    quality-index: 0;
+    in-out property <int>    format-index: 1;
+    in-out property <bool>   audio-only: false;
+    in-out property <int>    audio-format-index: 0;
+
+    in-out property <bool>   use-time-range: false;
+    in-out property <string> start-time;
+    in-out property <string> end-time;
+
+    in-out property <bool>   download-subtitles: false;
+    in-out property <bool>   embed-thumbnail: false;
+    in-out property <bool>   sponsorblock: false;
+    in-out property <bool>   playlist-mode: false;
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    callback download-clicked();
+    callback browse-folder();
+    callback fetch-formats();
+    callback cancel-download();
+    callback open-output-folder();
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        // Header ───────────────────────────────────────────────────────────────
+        Rectangle {
+            height: 56px;
+            background: @linear-gradient(135deg, #1d4ed8, #6d28d9);
+            border-radius: 10px;
+            HorizontalLayout {
+                alignment: center;
+                Text {
+                    text: "▶  AMS YouTube Downloader";
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: white;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // URL ──────────────────────────────────────────────────────────────────
+        Card {
+            title: "URL DO VÍDEO / PLAYLIST";
+            HorizontalLayout {
+                spacing: 8px;
+                height: 36px;
+                LineEdit {
+                    placeholder-text: "Cole aqui o link do YouTube (ou outro site suportado)...";
+                    text <=> root.url;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Ver Formatos";
+                    enabled: root.url != "" && !root.is-downloading;
+                    clicked => { root.fetch-formats(); }
+                }
+            }
+        }
+
+        // Pasta de destino ─────────────────────────────────────────────────────
+        Card {
+            title: "PASTA DE DESTINO";
+            HorizontalLayout {
+                spacing: 8px;
+                height: 36px;
+                LineEdit {
+                    text <=> root.output-folder;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "Procurar...";
+                    clicked => { root.browse-folder(); }
+                }
+                Button {
+                    text: "↗ Abrir";
+                    clicked => { root.open-output-folder(); }
+                }
+            }
+        }
+
+        // Formato & Qualidade ──────────────────────────────────────────────────
+        Card {
+            title: "FORMATO E QUALIDADE";
+            VerticalLayout {
+                spacing: 10px;
+
+                // Linha 1: qualidade + container
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    height: 36px;
+
+                    Lbl { text: "Qualidade:"; }
+                    ComboBox {
+                        model: ["Melhor disponível", "4K (2160p)", "Full HD (1080p)", "HD (720p)", "SD (480p)", "360p", "Menor tamanho"];
+                        current-index <=> root.quality-index;
+                        enabled: !root.audio-only;
+                        width: 210px;
+                    }
+
+                    Lbl { text: "Container:"; }
+                    ComboBox {
+                        model: ["Auto", "MP4", "MKV", "WebM"];
+                        current-index <=> root.format-index;
+                        enabled: !root.audio-only;
+                        width: 110px;
+                    }
+                }
+
+                // Linha 2: checkboxes
+                HorizontalLayout {
+                    spacing: 24px;
+                    alignment: start;
+                    height: 24px;
+
+                    MyCheck {
+                        text: "Somente Áudio";
+                        checked <=> root.audio-only;
+                    }
+
+                    if root.audio-only : HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        Lbl { text: "Formato:"; }
+                        ComboBox {
+                            model: ["MP3", "M4A", "OGG", "WAV", "FLAC"];
+                            current-index <=> root.audio-format-index;
+                            width: 110px;
+                        }
+                    }
+
+                    MyCheck {
+                        text: "Baixar playlist inteira";
+                        checked <=> root.playlist-mode;
+                    }
+                }
+            }
+        }
+
+        // Trecho específico ────────────────────────────────────────────────────
+        Card {
+            title: "TRECHO ESPECÍFICO (OPCIONAL)";
+            VerticalLayout {
+                spacing: 10px;
+
+                MyCheck {
+                    text: "Baixar apenas um trecho do vídeo";
+                    checked <=> root.use-time-range;
+                }
+
+                if root.use-time-range : HorizontalLayout {
+                    spacing: 14px;
+                    alignment: start;
+                    height: 36px;
+
+                    Lbl { text: "Início (HH:MM:SS):"; }
+                    LineEdit {
+                        placeholder-text: "00:00:00";
+                        text <=> root.start-time;
+                        width: 130px;
+                    }
+                    Lbl { text: "Fim (HH:MM:SS):"; }
+                    LineEdit {
+                        placeholder-text: "00:10:00";
+                        text <=> root.end-time;
+                        width: 130px;
+                    }
+                }
+            }
+        }
+
+        // Opções extras ────────────────────────────────────────────────────────
+        Card {
+            title: "OPÇÕES EXTRAS";
+            HorizontalLayout {
+                spacing: 28px;
+                alignment: start;
+                height: 24px;
+
+                MyCheck {
+                    text: "Legendas (PT/EN)";
+                    checked <=> root.download-subtitles;
+                }
+                MyCheck {
+                    text: "Incorporar thumbnail";
+                    checked <=> root.embed-thumbnail;
+                }
+                MyCheck {
+                    text: "Remover patrocínios (SponsorBlock)";
+                    checked <=> root.sponsorblock;
+                }
+            }
+        }
+
+        // Barra de progresso ───────────────────────────────────────────────────
+        Rectangle {
+            height: 34px;
+            background: #1e293b;
+            border-radius: 17px;
+            border-width: 1px;
+            border-color: #334155;
+            clip: true;
+
+            Rectangle {
+                x: 0; y: 0;
+                width: root.progress * parent.width;
+                height: parent.height;
+                background: root.progress > 0.98 ? #22c55e : #3b82f6;
+                animate width      { duration: 250ms; easing: ease-out; }
+                animate background { duration: 600ms; }
+            }
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.is-downloading
+                    ? (round(root.progress * 100) + "% — Baixando...")
+                    : (root.progress > 0.98 ? "✓  Concluído!" : "Pronto para baixar");
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: root.progress > 0.5 ? white : #64748b;
+                font-weight: 700;
+                font-size: 13px;
+            }
+        }
+
+        // Botões ───────────────────────────────────────────────────────────────
+        HorizontalLayout {
+            spacing: 8px;
+
+            Button {
+                text: root.is-downloading ? "Baixando..." : "⬇  Baixar";
+                primary: true;
+                horizontal-stretch: 1;
+                enabled: !root.is-downloading && root.url != "";
+                clicked => { root.download-clicked(); }
+            }
+
+            if root.is-downloading : Button {
+                text: "✕  Cancelar";
+                clicked => { root.cancel-download(); }
+            }
+        }
+
+        // Log ──────────────────────────────────────────────────────────────────
+        Text {
+            text: "▸ Saída (mais recente no topo):";
+            font-size: 11px;
+            color: #475569;
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: 140px;
+            background: #020617;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: #334155;
+            clip: true;
+
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.width;
+                viewport-height: max(self.height, log-content.preferred-height + 16px);
+
+                log-content := Text {
+                    x: 10px;
+                    y: 8px;
+                    width: parent.width - 20px;
+                    text: root.log-text == "" ? "Aguardando..." : root.log-text;
+                    color: root.log-text == "" ? #334155 : #86efac;
+                    font-size: 12px;
+                    font-family: "Consolas";
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
