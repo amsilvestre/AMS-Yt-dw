@@ -15,6 +15,12 @@ yt-dlp.exe
 AMS_YT_Downloader.exe
 *.exe.bak
 
+# ── Ferramentas baixadas pelo CI (não commitar) ───────────────────────────────
+tools/
+
+# ── Instalador gerado ─────────────────────────────────────────────────────────
+installer/output/
+
 # ── Ferramentas de desenvolvimento ────────────────────────────────────────────
 .claude/
 

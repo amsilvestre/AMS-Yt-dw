@@ -1,0 +1,99 @@
+name: Build & Release
+
+# Dispara quando uma tag v* é criada (ex: v1.1.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Rust toolchain ────────────────────────────────────────────────────
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # ── 3. Compilar app ──────────────────────────────────────────────────────
+      - name: Build release
+        run: cargo build --release
+
+      - name: Rename binary
+        run: Copy-Item "target\release\ams-yt-dw.exe" "AMS_YT_Downloader.exe"
+        shell: pwsh
+
+      # ── 4. Baixar yt-dlp ─────────────────────────────────────────────────────
+      - name: Download yt-dlp
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path tools | Out-Null
+          $rel = Invoke-RestMethod "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+          $url = ($rel.assets | Where-Object { $_.name -eq "yt-dlp.exe" }).browser_download_url
+          Invoke-WebRequest -Uri $url -OutFile "tools\yt-dlp.exe"
+          Write-Host "yt-dlp baixado: $(Get-Item tools\yt-dlp.exe | Select-Object -ExpandProperty Length) bytes"
+
+      # ── 5. Baixar ffmpeg ─────────────────────────────────────────────────────
+      - name: Download ffmpeg
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/ffmpeg-builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile "ffmpeg.zip"
+          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_tmp"
+          $exe = Get-ChildItem -Path "ffmpeg_tmp" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName "tools\ffmpeg.exe"
+          Remove-Item "ffmpeg.zip", "ffmpeg_tmp" -Recurse -Force
+          Write-Host "ffmpeg baixado: $(Get-Item tools\ffmpeg.exe | Select-Object -ExpandProperty Length) bytes"
+
+      # ── 6. Gerar instalador com Inno Setup ───────────────────────────────────
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          New-Item -ItemType Directory -Force -Path "installer\output" | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version "installer\setup.iss"
+          Write-Host "Instalador gerado:"
+          Get-ChildItem "installer\output\*.exe"
+
+      # ── 7. Publicar release ──────────────────────────────────────────────────
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }} — AMS YouTube Downloader"
+          body: |
+            ## AMS YouTube Downloader ${{ github.ref_name }}
+
+            ### Downloads
+
+            | Arquivo | Descrição |
+            |---|---|
+            | `AMS_YT_Downloader_Setup_*.exe` | ✅ **Instalador recomendado** — inclui yt-dlp e ffmpeg |
+            | `AMS_YT_Downloader.exe` | Executável portátil — requer `yt-dlp.exe` e `ffmpeg.exe` na mesma pasta |
+
+            ### O instalador inclui
+            - ✅ AMS YouTube Downloader
+            - ✅ yt-dlp (versão mais recente)
+            - ✅ ffmpeg
+
+            ### Requisito opcional
+            - [Node.js](https://nodejs.org) — elimina aviso de runtime JS do yt-dlp
+          files: |
+            AMS_YT_Downloader.exe
+            installer/output/*.exe
+          fail_on_unmatched_files: true
