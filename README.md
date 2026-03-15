@@ -24,7 +24,7 @@ Desenvolvido em **Rust** com interface **Slint**.
 
 ## Capturas de tela
 
-![AMS YouTube Downloader](assets/screenshot.png)
+![AMS YouTube Downloader](screenshot.png)
 
 ---
 
