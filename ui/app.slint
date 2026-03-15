@@ -1,6 +1,6 @@
 import { Button, LineEdit, ComboBox } from "std-widgets.slint";
 
-// ── Checkbox customizado (texto sempre legível) ────────────────────────────────
+// ── Checkbox customizado ───────────────────────────────────────────────────────
 component MyCheck inherits HorizontalLayout {
     in-out property <bool> checked: false;
     in property  <string>  text: "";
@@ -14,9 +14,7 @@ component MyCheck inherits HorizontalLayout {
         height: 18px;
         border-radius: 4px;
         border-width: 2px;
-        border-color: root.enabled
-            ? (root.checked ? #3b82f6 : #475569)
-            : #334155;
+        border-color: root.enabled ? (root.checked ? #3b82f6 : #475569) : #334155;
         background: root.enabled && root.checked ? #3b82f6 : transparent;
 
         Text {
@@ -31,8 +29,6 @@ component MyCheck inherits HorizontalLayout {
 
         TouchArea {
             enabled: root.enabled;
-            width: parent.width;
-            height: parent.height;
             clicked => { root.checked = !root.checked; }
         }
     }
@@ -48,7 +44,6 @@ component MyCheck inherits HorizontalLayout {
 // ── Card de seção ─────────────────────────────────────────────────────────────
 component Card inherits Rectangle {
     in property <string> title: "";
-
     background: #1e293b;
     border-radius: 8px;
     border-width: 1px;
@@ -67,16 +62,42 @@ component Card inherits Rectangle {
             font-size: 11px;
             font-weight: 700;
         }
-
         @children
     }
 }
 
-// ── Rótulo inline ──────────────────────────────────────────────────────────────
+// ── Rótulo inline ─────────────────────────────────────────────────────────────
 component Lbl inherits Text {
     color: #94a3b8;
     font-size: 13px;
     vertical-alignment: center;
+}
+
+// ── Botão do header ───────────────────────────────────────────────────────────
+component HeaderBtn inherits Rectangle {
+    in property <string> label;
+    in property <color>  label-color: white;
+    in property <color>  hover-bg: #ffffff28;
+    in property <color>  idle-bg: #ffffff14;
+    callback clicked;
+
+    width: 80px;
+    height: 30px;
+    border-radius: 6px;
+    background: ta.has-hover ? root.hover-bg : root.idle-bg;
+
+    Text {
+        text: root.label;
+        color: root.label-color;
+        font-size: 12px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+
+    ta := TouchArea { clicked => { root.clicked(); } }
 }
 
 // ── Janela principal ───────────────────────────────────────────────────────────
@@ -89,7 +110,7 @@ export component AppWindow inherits Window {
     min-height: 620px;
     background: #0f172a;
 
-    // ── Propriedades ──────────────────────────────────────────────────────────
+    // ── Propriedades principais ───────────────────────────────────────────────
     in-out property <string> url;
     in-out property <string> output-folder;
     in-out property <string> log-text;
@@ -110,36 +131,66 @@ export component AppWindow inherits Window {
     in-out property <bool>   sponsorblock: false;
     in-out property <bool>   playlist-mode: false;
 
+    // ── Propriedades dos modais ───────────────────────────────────────────────
+    in-out property <bool>   show-about: false;
+    in-out property <bool>   show-donate: false;
+    in-out property <bool>   pix-copied: false;
+    in property    <image>   qr-image;
+    in property    <string>  app-version: "1.0.0";
+
     // ── Callbacks ─────────────────────────────────────────────────────────────
     callback download-clicked();
     callback browse-folder();
     callback fetch-formats();
     callback cancel-download();
     callback open-output-folder();
+    callback open-github();
+    callback copy-pix-key();
 
-    // ── Layout ────────────────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════
+    // CONTEÚDO PRINCIPAL
+    // ══════════════════════════════════════════════════════════════════════════
     VerticalLayout {
         padding: 14px;
         spacing: 10px;
 
-        // Header ───────────────────────────────────────────────────────────────
+        // ── Header ────────────────────────────────────────────────────────────
         Rectangle {
             height: 56px;
             background: @linear-gradient(135deg, #1d4ed8, #6d28d9);
             border-radius: 10px;
-            HorizontalLayout {
-                alignment: center;
-                Text {
-                    text: "▶  AMS YouTube Downloader";
-                    font-size: 20px;
-                    font-weight: 700;
-                    color: white;
-                    vertical-alignment: center;
-                }
+
+            // Título centrado
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                text: "▶  AMS YouTube Downloader";
+                font-size: 20px;
+                font-weight: 700;
+                color: white;
+            }
+
+            // Botão Sobre
+            HeaderBtn {
+                x: parent.width - 172px;
+                y: 13px;
+                label: "Sobre";
+                clicked => { root.show-about = true; }
+            }
+
+            // Botão Doar
+            HeaderBtn {
+                x: parent.width - 88px;
+                y: 13px;
+                label: "♥  Doar";
+                label-color: #fbbf24;
+                hover-bg: #f59e0b40;
+                idle-bg: #f59e0b20;
+                clicked => { root.show-donate = true; }
             }
         }
 
-        // URL ──────────────────────────────────────────────────────────────────
+        // ── URL ───────────────────────────────────────────────────────────────
         Card {
             title: "URL DO VÍDEO / PLAYLIST";
             HorizontalLayout {
@@ -158,7 +209,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Pasta de destino ─────────────────────────────────────────────────────
+        // ── Pasta de destino ──────────────────────────────────────────────────
         Card {
             title: "PASTA DE DESTINO";
             HorizontalLayout {
@@ -179,13 +230,12 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Formato & Qualidade ──────────────────────────────────────────────────
+        // ── Formato & Qualidade ───────────────────────────────────────────────
         Card {
             title: "FORMATO E QUALIDADE";
             VerticalLayout {
                 spacing: 10px;
 
-                // Linha 1: qualidade + container
                 HorizontalLayout {
                     spacing: 12px;
                     alignment: start;
@@ -198,7 +248,6 @@ export component AppWindow inherits Window {
                         enabled: !root.audio-only;
                         width: 210px;
                     }
-
                     Lbl { text: "Container:"; }
                     ComboBox {
                         model: ["Auto", "MP4", "MKV", "WebM"];
@@ -208,16 +257,12 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Linha 2: checkboxes
                 HorizontalLayout {
                     spacing: 24px;
                     alignment: start;
                     height: 24px;
 
-                    MyCheck {
-                        text: "Somente Áudio";
-                        checked <=> root.audio-only;
-                    }
+                    MyCheck { text: "Somente Áudio"; checked <=> root.audio-only; }
 
                     if root.audio-only : HorizontalLayout {
                         spacing: 8px;
@@ -230,70 +275,43 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    MyCheck {
-                        text: "Baixar playlist inteira";
-                        checked <=> root.playlist-mode;
-                    }
+                    MyCheck { text: "Baixar playlist inteira"; checked <=> root.playlist-mode; }
                 }
             }
         }
 
-        // Trecho específico ────────────────────────────────────────────────────
+        // ── Trecho específico ─────────────────────────────────────────────────
         Card {
             title: "TRECHO ESPECÍFICO (OPCIONAL)";
             VerticalLayout {
                 spacing: 10px;
-
-                MyCheck {
-                    text: "Baixar apenas um trecho do vídeo";
-                    checked <=> root.use-time-range;
-                }
-
+                MyCheck { text: "Baixar apenas um trecho do vídeo"; checked <=> root.use-time-range; }
                 if root.use-time-range : HorizontalLayout {
                     spacing: 14px;
                     alignment: start;
                     height: 36px;
-
                     Lbl { text: "Início (HH:MM:SS):"; }
-                    LineEdit {
-                        placeholder-text: "00:00:00";
-                        text <=> root.start-time;
-                        width: 130px;
-                    }
+                    LineEdit { placeholder-text: "00:00:00"; text <=> root.start-time; width: 130px; }
                     Lbl { text: "Fim (HH:MM:SS):"; }
-                    LineEdit {
-                        placeholder-text: "00:10:00";
-                        text <=> root.end-time;
-                        width: 130px;
-                    }
+                    LineEdit { placeholder-text: "00:10:00"; text <=> root.end-time; width: 130px; }
                 }
             }
         }
 
-        // Opções extras ────────────────────────────────────────────────────────
+        // ── Opções extras ─────────────────────────────────────────────────────
         Card {
             title: "OPÇÕES EXTRAS";
             HorizontalLayout {
                 spacing: 28px;
                 alignment: start;
                 height: 24px;
-
-                MyCheck {
-                    text: "Legendas (PT/EN)";
-                    checked <=> root.download-subtitles;
-                }
-                MyCheck {
-                    text: "Incorporar thumbnail";
-                    checked <=> root.embed-thumbnail;
-                }
-                MyCheck {
-                    text: "Remover patrocínios (SponsorBlock)";
-                    checked <=> root.sponsorblock;
-                }
+                MyCheck { text: "Legendas (PT/EN)";              checked <=> root.download-subtitles; }
+                MyCheck { text: "Incorporar thumbnail";          checked <=> root.embed-thumbnail; }
+                MyCheck { text: "Remover patrocínios (SponsorBlock)"; checked <=> root.sponsorblock; }
             }
         }
 
-        // Barra de progresso ───────────────────────────────────────────────────
+        // ── Barra de progresso ────────────────────────────────────────────────
         Rectangle {
             height: 34px;
             background: #1e293b;
@@ -310,10 +328,8 @@ export component AppWindow inherits Window {
                 animate width      { duration: 250ms; easing: ease-out; }
                 animate background { duration: 600ms; }
             }
-
             Text {
-                width: parent.width;
-                height: parent.height;
+                width: parent.width; height: parent.height;
                 text: root.is-downloading
                     ? (round(root.progress * 100) + "% — Baixando...")
                     : (root.progress > 0.98 ? "✓  Concluído!" : "Pronto para baixar");
@@ -325,10 +341,9 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Botões ───────────────────────────────────────────────────────────────
+        // ── Botões ────────────────────────────────────────────────────────────
         HorizontalLayout {
             spacing: 8px;
-
             Button {
                 text: root.is-downloading ? "Baixando..." : "⬇  Baixar";
                 primary: true;
@@ -336,19 +351,14 @@ export component AppWindow inherits Window {
                 enabled: !root.is-downloading && root.url != "";
                 clicked => { root.download-clicked(); }
             }
-
             if root.is-downloading : Button {
                 text: "✕  Cancelar";
                 clicked => { root.cancel-download(); }
             }
         }
 
-        // Log ──────────────────────────────────────────────────────────────────
-        Text {
-            text: "▸ Saída (mais recente no topo):";
-            font-size: 11px;
-            color: #475569;
-        }
+        // ── Log ───────────────────────────────────────────────────────────────
+        Text { text: "▸ Saída (mais recente no topo):"; font-size: 11px; color: #475569; }
 
         Rectangle {
             vertical-stretch: 1;
@@ -366,14 +376,279 @@ export component AppWindow inherits Window {
                 viewport-height: max(self.height, log-content.preferred-height + 16px);
 
                 log-content := Text {
-                    x: 10px;
-                    y: 8px;
+                    x: 10px; y: 8px;
                     width: parent.width - 20px;
                     text: root.log-text == "" ? "Aguardando..." : root.log-text;
                     color: root.log-text == "" ? #334155 : #86efac;
                     font-size: 12px;
                     font-family: "Consolas";
                     wrap: word-wrap;
+                }
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODAL — SOBRE
+    // ══════════════════════════════════════════════════════════════════════════
+    if root.show-about : Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000099;
+
+        // Clique fora para fechar (ANTES do card para ficar por baixo)
+        TouchArea {
+            x: 0; y: 0;
+            width: parent.width; height: parent.height;
+            clicked => { root.show-about = false; }
+        }
+
+        // Card central (por cima do TouchArea)
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 420px;
+            height: 300px;
+            background: #1e293b;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: #334155;
+
+            // Bloqueia cliques no card de propagar pro fundo
+            TouchArea {}
+
+            VerticalLayout {
+                padding: 28px;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "AMS YouTube Downloader";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: white;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "v" + root.app-version;
+                    font-size: 12px;
+                    color: #60a5fa;
+                    horizontal-alignment: center;
+                }
+
+                Rectangle { height: 1px; background: #334155; }
+
+                Text {
+                    text: "Interface grafica para o yt-dlp.\nBaixe videos do YouTube e centenas\nde outros sites com facilidade.";
+                    font-size: 13px;
+                    color: #94a3b8;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { height: 4px; }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 160px; height: 36px;
+                        border-radius: 8px;
+                        background: gh-ta.has-hover ? #1d4ed8 : #1e3a8a;
+                        border-width: 1px;
+                        border-color: #3b82f6;
+                        Text {
+                            text: "Ver no GitHub";
+                            color: white;
+                            font-size: 13px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
+                        }
+                        gh-ta := TouchArea { clicked => { root.open-github(); } }
+                    }
+
+                    Rectangle {
+                        width: 100px; height: 36px;
+                        border-radius: 8px;
+                        background: close-ta.has-hover ? #334155 : #1e293b;
+                        border-width: 1px;
+                        border-color: #475569;
+                        Text {
+                            text: "Fechar";
+                            color: #94a3b8;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
+                        }
+                        close-ta := TouchArea { clicked => { root.show-about = false; } }
+                    }
+                }
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // MODAL — DOAR (PIX)
+    // ══════════════════════════════════════════════════════════════════════════
+    if root.show-donate : Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000099;
+
+        // Clique fora para fechar (ANTES do card)
+        TouchArea {
+            x: 0; y: 0;
+            width: parent.width; height: parent.height;
+            clicked => { root.show-donate = false; }
+        }
+
+        // Card central (por cima do TouchArea)
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 380px;
+            height: 480px;
+            background: #1e293b;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: #334155;
+
+            // Bloqueia cliques no card
+            TouchArea {}
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 10px;
+                alignment: start;
+
+                Text {
+                    text: "Apoiar o Projeto";
+                    font-size: 17px;
+                    font-weight: 700;
+                    color: #fbbf24;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "Escaneie com qualquer app bancario";
+                    font-size: 12px;
+                    color: #64748b;
+                    horizontal-alignment: center;
+                }
+
+                // QR Code
+                Rectangle {
+                    height: 216px;
+                    background: transparent;
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 216px;
+                            height: 216px;
+                            background: white;
+                            border-radius: 10px;
+                            Image {
+                                x: 8px; y: 8px;
+                                width: 200px;
+                                height: 200px;
+                                source: root.qr-image;
+                                image-rendering: pixelated;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 1px; background: #334155; }
+
+                Text {
+                    text: "Chave Pix:";
+                    font-size: 11px;
+                    color: #64748b;
+                    font-weight: 700;
+                }
+
+                // Chave Pix (largura fixa, sem stretch)
+                Rectangle {
+                    width: 332px;
+                    height: 34px;
+                    border-radius: 6px;
+                    background: #0f172a;
+                    border-width: 1px;
+                    border-color: #334155;
+                    Text {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        text: "pixcafe@silvestrehost.com";
+                        color: #e2e8f0;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Copiar
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 120px; height: 34px;
+                        border-radius: 6px;
+                        background: root.pix-copied
+                            ? #16a34a
+                            : (copy-ta.has-hover ? #334155 : #1e293b);
+                        border-width: 1px;
+                        border-color: root.pix-copied ? #22c55e : #475569;
+                        animate background { duration: 300ms; }
+                        Text {
+                            text: root.pix-copied ? "Copiado!" : "Copiar chave";
+                            color: root.pix-copied ? #86efac : #e2e8f0;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
+                            animate color { duration: 300ms; }
+                        }
+                        copy-ta := TouchArea {
+                            clicked => { root.copy-pix-key(); }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Obrigado pelo apoio!";
+                    font-size: 12px;
+                    color: #475569;
+                    horizontal-alignment: center;
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 120px; height: 36px;
+                        border-radius: 8px;
+                        background: close-d-ta.has-hover ? #334155 : #1e293b;
+                        border-width: 1px;
+                        border-color: #475569;
+                        Text {
+                            text: "Fechar";
+                            color: #94a3b8;
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
+                        }
+                        close-d-ta := TouchArea { clicked => { root.show-donate = false; } }
+                    }
                 }
             }
         }

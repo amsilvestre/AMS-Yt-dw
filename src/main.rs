@@ -375,10 +375,89 @@ fn spawn_fetch_formats(weak: slint::Weak<AppWindow>, url: String) {
     });
 }
 
+// ── Pix BR Code (EMV QR Code) ─────────────────────────────────────────────────
+
+fn crc16_ccitt(data: &str) -> u16 {
+    let mut crc: u16 = 0xFFFF;
+    for byte in data.bytes() {
+        crc ^= (byte as u16) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+        }
+    }
+    crc
+}
+
+fn pix_br_code(key: &str, name: &str, city: &str) -> String {
+    let emv = |id: &str, val: &str| format!("{}{:02}{}", id, val.len(), val);
+    let mai = emv("00", "br.gov.bcb.pix") + &emv("01", key);
+    let name = if name.len() > 25 { &name[..25] } else { name };
+    let city = if city.len() > 15 { &city[..15] } else { city };
+    let payload = "000201".to_owned()
+        + "010211"
+        + &emv("26", &mai)
+        + "52040000"
+        + "5303986"
+        + "5802BR"
+        + &emv("59", name)
+        + &emv("60", city)
+        + "62070503***"
+        + "6304";
+    format!("{}{:04X}", payload, crc16_ccitt(&payload))
+}
+
+// ── QR Code → Slint Image ─────────────────────────────────────────────────────
+
+fn generate_qr_image(data: &str) -> slint::Image {
+    let code = qrcode::QrCode::with_error_correction_level(
+        data.as_bytes(),
+        qrcode::EcLevel::M,
+    )
+    .unwrap_or_else(|_| qrcode::QrCode::new(data.as_bytes()).unwrap());
+
+    let modules = code.width();
+    let scale: usize = 6;
+    let quiet: usize = 4;
+    let full = (modules + 2 * quiet) * scale;
+
+    let mut px = vec![255u8; full * full * 4]; // RGBA branco
+
+    for (i, color) in code.to_colors().iter().enumerate() {
+        if *color == qrcode::Color::Dark {
+            let row = i / modules;
+            let col = i % modules;
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    let idx = ((row + quiet) * scale + dy) * full + (col + quiet) * scale + dx;
+                    px[idx * 4]     = 0;
+                    px[idx * 4 + 1] = 0;
+                    px[idx * 4 + 2] = 0;
+                    // alpha já é 255
+                }
+            }
+        }
+    }
+
+    slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
+        &px,
+        full as u32,
+        full as u32,
+    ))
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+const PIX_KEY: &str = "pixcafe@silvestrehost.com";
 
 fn main() {
     let app = AppWindow::new().expect("Failed to create window");
+
+    // Versão do app
+    app.set_app_version(env!("CARGO_PKG_VERSION").into());
+
+    // QR Code Pix
+    let payload = pix_br_code(PIX_KEY, "AMS Silvestre", "Rio de Janeiro");
+    app.set_qr_image(generate_qr_image(&payload));
 
     // Default output folder → user's Downloads directory
     if let Some(dl) = dirs::download_dir() {
@@ -386,6 +465,34 @@ fn main() {
     }
 
     let cancel = Arc::new(Mutex::new(false));
+
+    // ── Abrir GitHub ──────────────────────────────────────────────────────────
+    app.on_open_github(|| {
+        #[cfg(target_os = "windows")]
+        let _ = Command::new("cmd")
+            .args(["/c", "start", "", "https://github.com/amsilvestre/AMS-Yt-dw"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+    });
+
+    // ── Copiar chave Pix ──────────────────────────────────────────────────────
+    {
+        let weak = app.as_weak();
+        app.on_copy_pix_key(move || {
+            if let Ok(mut ctx) = arboard::Clipboard::new() {
+                let _ = ctx.set_text(PIX_KEY);
+            }
+            if let Some(a) = weak.upgrade() {
+                a.set_pix_copied(true);
+                let w = weak.clone();
+                slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                    if let Some(a) = w.upgrade() {
+                        a.set_pix_copied(false);
+                    }
+                });
+            }
+        });
+    }
 
     // ── Browse folder ─────────────────────────────────────────────────────────
     {
