@@ -1,8 +1,8 @@
 # AMS YouTube Downloader
 
-> Interface gráfica Windows para o **yt-dlp** — baixe vídeos e áudios do YouTube (e centenas de outros sites) com facilidade.
+> Interface gráfica para o **yt-dlp** — baixe vídeos e áudios do YouTube (e centenas de outros sites) com facilidade.
 
-Desenvolvido em **Rust** com interface **Slint**.
+Desenvolvido em **Rust** com interface **Slint**. Roda em **Windows** e **Linux**.
 
 ---
 
@@ -24,52 +24,116 @@ Desenvolvido em **Rust** com interface **Slint**.
 
 ## Capturas de tela
 
-![AMS YouTube Downloader](screenshot.png)
+| Windows | Linux |
+|---|---|
+| ![Windows](screenshot.png) | ![Linux](screenshot-linux.png) |
+
+---
+
+## Instalação
+
+### Windows
+
+Baixe o instalador `AMS_YT_Downloader_Setup_*.exe` da [página de releases](../../releases).
+Ele já inclui o `yt-dlp` e o `ffmpeg` — nada mais a fazer.
+
+Se preferir o portátil (`AMS_YT_Downloader.exe`), coloque `yt-dlp.exe` e
+`ffmpeg.exe` na mesma pasta ou no PATH.
+
+### Linux (x86_64)
+
+**Fedora / RHEL**
+```bash
+sudo dnf install ./ams-yt-dw-*.x86_64.rpm
+```
+
+**Debian / Ubuntu**
+```bash
+sudo apt install ./ams-yt-dw_*_amd64.deb
+```
+
+**Portátil (qualquer distro, sem root)**
+```bash
+tar -xzf AMS_YT_Downloader-*-linux-x86_64.tar.gz
+cd AMS_YT_Downloader-*/
+./install.sh          # instala em ~/.local; --uninstall remove
+```
+
+No Linux o `yt-dlp` e o `ffmpeg` **não vêm embutidos** — os pacotes os declaram
+como dependência do sistema. Isso é proposital: o yt-dlp quebra sempre que o
+YouTube muda, e assim ele continua recebendo atualização pela sua distro.
+
+> Para uma versão do yt-dlp mais nova que a da distro: `pipx install yt-dlp`
 
 ---
 
 ## Requisitos
 
-O app em si é um único `.exe`, mas precisa das ferramentas abaixo na **mesma pasta** ou no **PATH do sistema**:
+| Ferramenta | Obrigatório | Windows | Linux |
+|---|---|---|---|
+| `yt-dlp` | ✅ Sim | [releases](https://github.com/yt-dlp/yt-dlp/releases) (`yt-dlp.exe`) | pacote da distro ou `pipx install yt-dlp` |
+| `ffmpeg` | ✅ Sim — mesclar formatos, converter áudio, recortar trecho | [ffmpeg.org](https://ffmpeg.org/download.html) | `ffmpeg` (Debian) / `ffmpeg-free` (Fedora) |
+| Node.js | ⚠️ Recomendado | [nodejs.org](https://nodejs.org) | pacote `nodejs` |
 
-| Ferramenta | Obrigatório | Download |
-|---|---|---|
-| `yt-dlp.exe` | ✅ Sim | [github.com/yt-dlp/yt-dlp/releases](https://github.com/yt-dlp/yt-dlp/releases) |
-| `ffmpeg.exe` | ✅ Sim (para mesclar formatos, converter áudio, recorte de trecho) | [ffmpeg.org/download.html](https://ffmpeg.org/download.html) → Windows builds |
-| Node.js | ⚠️ Recomendado | [nodejs.org](https://nodejs.org) — evita aviso de runtime JS do yt-dlp |
+No Windows as ferramentas podem ficar na **mesma pasta** do executável ou no
+**PATH**; no Linux, no PATH (os pacotes já cuidam disso).
 
-> **Nota:** sem o Node.js o yt-dlp ainda funciona, mas pode exibir um aviso sobre runtime JavaScript. O app detecta automaticamente se o Node.js estiver instalado e o configura sem intervenção.
+> **Nota:** sem o Node.js o yt-dlp ainda funciona, mas pode exibir um aviso sobre
+> runtime JavaScript. O app detecta o Node.js automaticamente — e só passa a flag
+> `--js-runtimes` se a sua versão do yt-dlp a suportar, para não quebrar com as
+> versões mais antigas que costumam vir nos repositórios das distros.
 
 ---
 
 ## Como usar
 
-1. Baixe o `AMS_YT_Downloader.exe` da [página de releases](../../releases)
-2. Coloque `yt-dlp.exe` e `ffmpeg.exe` na mesma pasta
-3. Execute `AMS_YT_Downloader.exe`
-4. Cole o link do vídeo, configure as opções e clique em **Baixar**
+1. Instale conforme a seção acima
+2. Abra o **AMS YouTube Downloader** (menu de aplicativos, ou `ams-yt-dw` no terminal)
+3. Cole o link do vídeo, configure as opções e clique em **Baixar**
 
 ---
 
 ## Como compilar
 
-### Pré-requisitos
+### Windows
 
 - [Rust](https://rustup.rs) (stable, 1.75+)
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/pt-br/visual-cpp-build-tools/) (para compilar no Windows)
-
-### Passos
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/pt-br/visual-cpp-build-tools/)
 
 ```bash
-git clone https://github.com/amsilvestre/AMS-Yt-dw.git
-cd AMS-Yt-dw
+cargo build --release
+```
+
+### Linux
+
+A única dependência de sistema é o **fontconfig** — as bibliotecas de janela e
+OpenGL (xkbcommon, Wayland, EGL) são carregadas via `dlopen` e não precisam de
+pacote `-dev`.
+
+```bash
+# Fedora
+sudo dnf install fontconfig-devel
+
+# Debian / Ubuntu
+sudo apt install build-essential pkg-config libfontconfig-dev
 
 cargo build --release
 ```
 
-O binário estará em `target/release/ams-yt-dw.exe`.
+O binário fica em `target/release/ams-yt-dw`.
 
-> O `build.rs` converte automaticamente o `assets/icon.ico` para `assets/icon_window.png` e embute o ícone no executável.
+### Gerar os pacotes Linux
+
+```bash
+cargo install cargo-deb cargo-generate-rpm
+
+packaging/build-tarball.sh     # tarball portátil + install.sh
+cargo deb                      # .deb
+cargo generate-rpm             # .rpm
+```
+
+> O `build.rs` converte automaticamente o `assets/icon.ico` para
+> `assets/icon_window.png` e, no Windows, embute o ícone no executável.
 
 ---
 
@@ -78,12 +142,19 @@ O binário estará em `target/release/ams-yt-dw.exe`.
 ```
 AMS-Yt-dw/
 ├── src/
-│   └── main.rs          # Lógica principal (Rust)
+│   └── main.rs              # Lógica principal (Rust)
 ├── ui/
-│   └── app.slint        # Interface gráfica (Slint)
+│   └── app.slint            # Interface gráfica (Slint)
 ├── assets/
-│   └── icon.ico         # Ícone do aplicativo
-├── build.rs             # Script de build (ícone + Slint)
+│   └── icon.ico             # Ícone do aplicativo
+├── installer/
+│   └── setup.iss            # Instalador Windows (Inno Setup)
+├── packaging/
+│   ├── ams-yt-dw.desktop    # Entrada de menu (Linux)
+│   └── build-tarball.sh     # Gera o tarball portátil
+├── docs/
+│   └── LINUX_PORT.md        # Registro do porte para Linux
+├── build.rs                 # Script de build (ícone + Slint)
 ├── Cargo.toml
 └── Cargo.lock
 ```
@@ -97,7 +168,9 @@ AMS-Yt-dw/
 | [`slint`](https://slint.dev) | Framework de UI nativa |
 | [`rfd`](https://crates.io/crates/rfd) | Diálogo de seleção de pasta |
 | [`dirs`](https://crates.io/crates/dirs) | Pasta Downloads padrão do usuário |
-| [`winresource`](https://crates.io/crates/winresource) | Embutir ícone no `.exe` |
+| [`arboard`](https://crates.io/crates/arboard) | Área de transferência (chave Pix) |
+| [`qrcode`](https://crates.io/crates/qrcode) | QR Code Pix |
+| [`winresource`](https://crates.io/crates/winresource) | Embutir ícone no `.exe` (só Windows) |
 | [`image`](https://crates.io/crates/image) | Converter ICO → PNG (build) |
 
 ---

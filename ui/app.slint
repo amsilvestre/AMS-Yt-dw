@@ -137,6 +137,8 @@ export component AppWindow inherits Window {
     in-out property <bool>   pix-copied: false;
     in property    <image>   qr-image;
     in property    <string>  app-version: "1.0.0";
+    // Definida pelo Rust: "Consolas" não existe fora do Windows.
+    in property    <string>  mono-font: "monospace";
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
     callback download-clicked();
@@ -381,7 +383,7 @@ export component AppWindow inherits Window {
                     text: root.log-text == "" ? "Aguardando..." : root.log-text;
                     color: root.log-text == "" ? #334155 : #86efac;
                     font-size: 12px;
-                    font-family: "Consolas";
+                    font-family: root.mono-font;
                     wrap: word-wrap;
                 }
             }

@@ -1,6 +1,6 @@
 name: Build & Release
 
-# Dispara quando uma tag v* é criada (ex: v1.1.0)
+# Dispara quando uma tag v* é criada (ex: v1.2.0)
 on:
   push:
     tags:
@@ -10,15 +10,32 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  # ── 0. Guarda: a tag precisa bater com a versão do Cargo.toml ───────────────
+  # Sem isto a tag v1.2.0 pode gerar um instalador chamado 1.2.0 enquanto o
+  # diálogo "Sobre" do app mostra 1.1.0 (ele lê CARGO_PKG_VERSION).
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Conferir versão
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "tag=$TAG  Cargo.toml=$CARGO"
+          if [ "$TAG" != "$CARGO" ]; then
+            echo "::error::A tag ($TAG) não bate com a versão do Cargo.toml ($CARGO)."
+            exit 1
+          fi
+
+  # ── 1. Windows: .exe portátil + instalador Inno Setup ──────────────────────
+  build-windows:
+    needs: check-version
     runs-on: windows-latest
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Rust toolchain ────────────────────────────────────────────────────
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -31,7 +48,6 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      # ── 3. Compilar app ──────────────────────────────────────────────────────
       - name: Build release
         run: cargo build --release
 
@@ -39,7 +55,6 @@ jobs:
         run: Copy-Item "target\release\ams-yt-dw.exe" "AMS_YT_Downloader.exe"
         shell: pwsh
 
-      # ── 4. Baixar yt-dlp ─────────────────────────────────────────────────────
       - name: Download yt-dlp
         shell: pwsh
         run: |
@@ -49,7 +64,6 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "tools\yt-dlp.exe"
           Write-Host "yt-dlp baixado: $(Get-Item tools\yt-dlp.exe | Select-Object -ExpandProperty Length) bytes"
 
-      # ── 5. Baixar ffmpeg ─────────────────────────────────────────────────────
       - name: Download ffmpeg
         shell: pwsh
         run: |
@@ -61,39 +75,135 @@ jobs:
           Remove-Item "ffmpeg.zip", "ffmpeg_tmp" -Recurse -Force
           Write-Host "ffmpeg baixado: $(Get-Item tools\ffmpeg.exe | Select-Object -ExpandProperty Length) bytes"
 
-      # ── 6. Gerar instalador com Inno Setup ───────────────────────────────────
       - name: Build installer
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
           New-Item -ItemType Directory -Force -Path "installer\output" | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version "installer\setup.iss"
-          Write-Host "Instalador gerado:"
           Get-ChildItem "installer\output\*.exe"
 
-      # ── 7. Publicar release ──────────────────────────────────────────────────
-      - name: Publish release
+      - name: Upload artefatos Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            AMS_YT_Downloader.exe
+            installer/output/*.exe
+          if-no-files-found: error
+
+  # ── 2. Linux: tarball portátil + .deb + .rpm ───────────────────────────────
+  build-linux:
+    needs: check-version
+    # 22.04 de propósito: é a imagem com o glibc mais antigo ainda disponível,
+    # e o binário não roda em distros com glibc anterior ao da máquina de build.
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # Única dependência de sistema que o build cobra: as libs de janela/GL
+      # (xkbcommon, wayland, EGL) são abertas via dlopen e não precisam de -dev.
+      # O pacote `rpm` entra por causa do /usr/lib/rpm/find-requires, que o
+      # cargo-generate-rpm usa para resolver as dependências de soname.
+      - name: Dependências de sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig-dev rpm
+
+      - name: Ferramentas de empacotamento
+        run: |
+          cargo install --locked cargo-deb cargo-generate-rpm
+
+      - name: Build release
+        env:
+          SLINT_BACKEND: winit
+        run: cargo build --release
+
+      - name: Gerar pacotes
+        run: |
+          mkdir -p dist
+          bash packaging/build-tarball.sh --skip-build
+          cargo deb --no-build
+          cargo generate-rpm
+          cp target/tarball/*.tar.gz     dist/
+          cp target/debian/*.deb         dist/
+          cp target/generate-rpm/*.rpm   dist/
+          ls -lh dist/
+
+      - name: Conferir metadados dos pacotes
+        run: |
+          echo "── Requires do RPM ──"
+          rpm -qpR dist/*.rpm | grep -v '\.so'
+          echo "── Conteúdo do RPM ──"
+          rpm -qlp dist/*.rpm
+
+      - name: Upload artefatos Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  # ── 3. Publicar UMA release com tudo ───────────────────────────────────────
+  # Separado dos builds de propósito: dois jobs publicando na mesma release
+  # competem entre si e o resultado depende de quem termina primeiro.
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar todos os artefatos
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Listar
+        run: find dist -type f | sort
+
+      - name: Publicar release
         uses: softprops/action-gh-release@v2
         with:
           name: "${{ github.ref_name }} — AMS YouTube Downloader"
           body: |
             ## AMS YouTube Downloader ${{ github.ref_name }}
 
-            ### Downloads
+            ### Windows
 
             | Arquivo | Descrição |
             |---|---|
             | `AMS_YT_Downloader_Setup_*.exe` | ✅ **Instalador recomendado** — inclui yt-dlp e ffmpeg |
-            | `AMS_YT_Downloader.exe` | Executável portátil — requer `yt-dlp.exe` e `ffmpeg.exe` na mesma pasta |
+            | `AMS_YT_Downloader.exe` | Portátil — requer `yt-dlp.exe` e `ffmpeg.exe` na mesma pasta |
 
-            ### O instalador inclui
-            - ✅ AMS YouTube Downloader
-            - ✅ yt-dlp (versão mais recente)
-            - ✅ ffmpeg
+            ### Linux (x86_64)
+
+            | Arquivo | Descrição |
+            |---|---|
+            | `ams-yt-dw-*.x86_64.rpm` | Fedora / RHEL — `sudo dnf install ./ams-yt-dw-*.rpm` |
+            | `ams-yt-dw_*_amd64.deb` | Debian / Ubuntu — `sudo apt install ./ams-yt-dw_*.deb` |
+            | `AMS_YT_Downloader-*-linux-x86_64.tar.gz` | Portátil — `./install.sh` instala em `~/.local` sem root |
+
+            No Linux o `yt-dlp` e o `ffmpeg` vêm do sistema, não embutidos: assim o
+            yt-dlp continua recebendo atualizações da distro (ele quebra sempre que
+            o YouTube muda). Os pacotes já declaram essas dependências.
+
+            > Para um yt-dlp mais novo que o da distro: `pipx install yt-dlp`
 
             ### Requisito opcional
-            - [Node.js](https://nodejs.org) — elimina aviso de runtime JS do yt-dlp
-          files: |
-            AMS_YT_Downloader.exe
-            installer/output/*.exe
+            - [Node.js](https://nodejs.org) — elimina o aviso de runtime JS do yt-dlp
+          files: dist/**/*
           fail_on_unmatched_files: true

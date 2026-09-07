@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::cell::RefCell;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 #[cfg(target_os = "windows")]
@@ -14,9 +16,54 @@ slint::include_modules!();
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+// ── Nomes das ferramentas externas ───────────────────────────────────────────
+
+#[cfg(windows)]
+const YTDLP: &str = "yt-dlp.exe";
+#[cfg(windows)]
+const FFMPEG: &str = "ffmpeg.exe";
+
+#[cfg(not(windows))]
+const YTDLP: &str = "yt-dlp";
+#[cfg(not(windows))]
+const FFMPEG: &str = "ffmpeg";
+
+/// Fonte monoespaçada do log — "Consolas" não existe fora do Windows.
+#[cfg(windows)]
+fn mono_font() -> String {
+    "Consolas".to_owned()
+}
+
+#[cfg(target_os = "macos")]
+fn mono_font() -> String {
+    "Menlo".to_owned()
+}
+
+/// O Slint consulta a fonte pelo **nome da família**; o alias genérico "monospace"
+/// não resolve e cairia silenciosamente na fonte sans padrão — justamente o
+/// desalinhamento da tabela de formatos que queremos evitar. Perguntamos ao
+/// fontconfig qual família o sistema usa. Qual delas é varia por distro
+/// (Fedora recente responde "Noto Sans Mono", não "DejaVu Sans Mono").
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn mono_font() -> String {
+    if let Ok(out) = Command::new("fc-match")
+        .args(["-f", "%{family[0]}", "monospace"])
+        .output()
+    {
+        if out.status.success() {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    // fc-match pode não estar instalado (sistema só com libfontconfig).
+    "Liberation Mono".to_owned()
+}
+
 // ── Tool finder ──────────────────────────────────────────────────────────────
 
-/// Looks for `name` (e.g. "yt-dlp.exe") next to the running executable first,
+/// Looks for `name` (e.g. "yt-dlp") next to the running executable first,
 /// then in the current working directory, and finally falls back to PATH.
 fn find_tool(name: &str) -> String {
     // 1. Alongside our own binary (release case)
@@ -56,7 +103,12 @@ fn parse_progress(line: &str) -> Option<f32> {
 
 /// Returns the path to `node` or `deno` if found, so yt-dlp can use a JS runtime.
 fn find_js_runtime() -> Option<String> {
-    for candidate in &["node", "node.exe", "deno", "deno.exe"] {
+    #[cfg(windows)]
+    let candidates: &[&str] = &["node.exe", "deno.exe"];
+    #[cfg(not(windows))]
+    let candidates: &[&str] = &["node", "deno"];
+
+    for candidate in candidates {
         if Command::new(candidate)
             .arg("--version")
             .stdout(Stdio::null())
@@ -68,6 +120,53 @@ fn find_js_runtime() -> Option<String> {
         }
     }
     None
+}
+
+/// `--js-runtimes` só existe em versões recentes do yt-dlp. Passar a flag para uma
+/// versão antiga faz o yt-dlp abortar por argumento desconhecido — e aí *nenhum*
+/// download funciona. No Linux o yt-dlp costuma vir do repositório da distro, que
+/// fica atrás, então a flag precisa ser condicional. Sondado uma única vez.
+fn ytdlp_supports_js_runtimes() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        let mut cmd = Command::new(find_tool(YTDLP));
+        cmd.arg("--help").stdin(Stdio::null());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.output() {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).contains("--js-runtimes"),
+            Err(_) => false,
+        }
+    })
+}
+
+// ── Abrir URL / pasta no aplicativo padrão ───────────────────────────────────
+
+fn open_url(url: &str) {
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("cmd")
+        .args(["/c", "start", "", url])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(url).spawn();
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let _ = Command::new("xdg-open").arg(url).spawn();
+}
+
+/// Abre uma pasta no gerenciador de arquivos. Separado de `open_url` de propósito:
+/// o caminho vem de um campo editável pelo usuário e não pode passar pelo parser
+/// do cmd.exe (um `&` ou `|` no nome seria reinterpretado).
+fn open_folder(path: &str) {
+    if path.is_empty() {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(path).spawn();
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let _ = Command::new("xdg-open").arg(path).spawn();
 }
 
 // ── Command builder ───────────────────────────────────────────────────────────
@@ -91,18 +190,29 @@ fn build_args(
     let mut a: Vec<String> = Vec::new();
 
     // ── JS runtime (Node.js / Deno) ───────────────────────────────────────────
+    // Ordem importa: sem node/deno instalado nem chegamos a sondar o yt-dlp.
     if let Some(runtime) = find_js_runtime() {
-        a.push("--js-runtimes".into());
-        a.push(runtime);
+        if ytdlp_supports_js_runtimes() {
+            a.push("--js-runtimes".into());
+            a.push(runtime);
+        }
     }
 
     // ── FFmpeg location ───────────────────────────────────────────────────────
-    let ffmpeg = find_tool("ffmpeg.exe");
+    let ffmpeg = find_tool(FFMPEG);
     a.push("--ffmpeg-location".into());
     a.push(ffmpeg);
 
     // ── Output template ───────────────────────────────────────────────────────
-    let folder = output_folder.replace('\\', "/");
+    // Pasta vazia viraria "-o /%(title)s..." → tentativa de escrita na raiz.
+    let folder = if output_folder.trim().is_empty() {
+        "."
+    } else {
+        output_folder
+    };
+    // Normalizar "\\" só faz sentido no Windows: no Linux é caractere legal em nomes.
+    #[cfg(windows)]
+    let folder = folder.replace('\\', "/");
     let template = if playlist_mode {
         format!("{folder}/%(playlist_index)02d - %(title)s.%(ext)s")
     } else {
@@ -244,24 +354,25 @@ fn spawn_download(
     playlist_mode: bool,
     cancel: Arc<Mutex<bool>>,
 ) {
-    let ytdlp = find_tool("yt-dlp.exe");
-    let args = build_args(
-        &url,
-        &output_folder,
-        quality_index,
-        format_index,
-        audio_only,
-        audio_format_index,
-        use_time_range,
-        &start_time,
-        &end_time,
-        download_subtitles,
-        embed_thumbnail,
-        sponsorblock,
-        playlist_mode,
-    );
-
+    // Montado dentro da thread: build_args sonda o yt-dlp e não pode travar a UI.
     thread::spawn(move || {
+        let ytdlp = find_tool(YTDLP);
+        let args = build_args(
+            &url,
+            &output_folder,
+            quality_index,
+            format_index,
+            audio_only,
+            audio_format_index,
+            use_time_range,
+            &start_time,
+            &end_time,
+            download_subtitles,
+            embed_thumbnail,
+            sponsorblock,
+            playlist_mode,
+        );
+
         let mut child = match new_command(&ytdlp, &args) {
             Ok(c) => c,
             Err(e) => {
@@ -331,8 +442,8 @@ fn spawn_download(
 // ── Fetch formats thread ──────────────────────────────────────────────────────
 
 fn spawn_fetch_formats(weak: slint::Weak<AppWindow>, url: String) {
-    let ytdlp = find_tool("yt-dlp.exe");
     thread::spawn(move || {
+        let ytdlp = find_tool(YTDLP);
         let args: Vec<String> = vec![
             "-F".to_owned(),
             "--no-playlist".to_owned(),
@@ -452,45 +563,87 @@ const PIX_KEY: &str = "pixcafe@silvestrehost.com";
 fn main() {
     let app = AppWindow::new().expect("Failed to create window");
 
+    // Wayland/X11: sem app_id o compositor não casa a janela com o
+    // ams-yt-dw.desktop e a dock mostra um ícone genérico. Medido com
+    // WAYLAND_DEBUG=1: sem esta chamada o protocolo nunca recebe um
+    // xdg_toplevel.set_app_id.
+    //
+    // Ordem importa: precisa ser DEPOIS de AppWindow::new() (que inicializa o
+    // contexto do Slint — antes disso a função devolve Err(NoPlatform) em
+    // silêncio) e ANTES de run(), que é quando a janela é exibida.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Err(e) = slint::set_xdg_app_id("ams-yt-dw") {
+        eprintln!("Aviso: não foi possível definir o app id XDG: {e}");
+    }
+
     // Versão do app
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
+
+    // Fonte monoespaçada do log (varia por plataforma)
+    app.set_mono_font(mono_font().into());
 
     // QR Code Pix
     let payload = pix_br_code(PIX_KEY, "AMS Silvestre", "Rio de Janeiro");
     app.set_qr_image(generate_qr_image(&payload));
 
-    // Default output folder → user's Downloads directory
-    if let Some(dl) = dirs::download_dir() {
-        app.set_output_folder(dl.to_string_lossy().into_owned().into());
-    }
+    // Default output folder → user's Downloads directory.
+    // No Linux `download_dir()` depende do xdg-user-dirs, que pode não existir;
+    // sem fallback a pasta ficaria vazia e o yt-dlp tentaria escrever na raiz.
+    let downloads = dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    app.set_output_folder(downloads.to_string_lossy().into_owned().into());
 
     let cancel = Arc::new(Mutex::new(false));
 
     // ── Abrir GitHub ──────────────────────────────────────────────────────────
     app.on_open_github(|| {
-        #[cfg(target_os = "windows")]
-        let _ = Command::new("cmd")
-            .args(["/c", "start", "", "https://github.com/amsilvestre/AMS-Yt-dw"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
+        open_url("https://github.com/amsilvestre/AMS-Yt-dw");
     });
 
     // ── Copiar chave Pix ──────────────────────────────────────────────────────
     {
         let weak = app.as_weak();
+        // O clipboard do X11 é baseado em posse: o processo dono precisa continuar
+        // vivo para servir a seleção. Criar e dropar o Clipboard a cada clique
+        // (como antes) faz o conteúdo sumir no Linux. Mantemos uma instância viva.
+        let clipboard: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::new(RefCell::new(None));
+
         app.on_copy_pix_key(move || {
-            if let Ok(mut ctx) = arboard::Clipboard::new() {
-                let _ = ctx.set_text(PIX_KEY);
-            }
-            if let Some(a) = weak.upgrade() {
-                a.set_pix_copied(true);
-                let w = weak.clone();
-                slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
-                    if let Some(a) = w.upgrade() {
-                        a.set_pix_copied(false);
+            let a = match weak.upgrade() {
+                Some(a) => a,
+                None => return,
+            };
+
+            let mut slot = clipboard.borrow_mut();
+            if slot.is_none() {
+                match arboard::Clipboard::new() {
+                    Ok(cb) => *slot = Some(cb),
+                    Err(e) => {
+                        prepend_log(&a, &format!("❌ Clipboard indisponível: {e}"));
+                        return;
                     }
-                });
+                }
             }
+
+            if let Err(e) = slot.as_mut().unwrap().set_text(PIX_KEY) {
+                // Instância pode ter perdido a conexão; força recriação no próximo clique.
+                *slot = None;
+                prepend_log(&a, &format!("❌ Não foi possível copiar a chave Pix: {e}"));
+                return;
+            }
+
+            // Libera o empréstimo antes de mexer na UI.
+            drop(slot);
+
+            a.set_pix_copied(true);
+            let w = weak.clone();
+            slint::Timer::single_shot(std::time::Duration::from_secs(2), move || {
+                if let Some(a) = w.upgrade() {
+                    a.set_pix_copied(false);
+                }
+            });
         });
     }
 
@@ -511,15 +664,7 @@ fn main() {
         let weak = app.as_weak();
         app.on_open_output_folder(move || {
             if let Some(a) = weak.upgrade() {
-                let path = a.get_output_folder().to_string();
-                if !path.is_empty() {
-                    #[cfg(target_os = "windows")]
-                    let _ = Command::new("explorer").arg(&path).spawn();
-                    #[cfg(target_os = "macos")]
-                    let _ = Command::new("open").arg(&path).spawn();
-                    #[cfg(target_os = "linux")]
-                    let _ = Command::new("xdg-open").arg(&path).spawn();
-                }
+                open_folder(a.get_output_folder().as_ref());
             }
         });
     }

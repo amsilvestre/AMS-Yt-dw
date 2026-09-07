@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=AMS YouTube Downloader
+GenericName=Video Downloader
+Comment=Baixe vídeos e áudios do YouTube e de centenas de outros sites
+Comment[en]=Download videos and audio from YouTube and hundreds of other sites
+Exec=ams-yt-dw
+Icon=ams-yt-dw
+Terminal=false
+Categories=AudioVideo;Recorder;
+Keywords=youtube;video;download;yt-dlp;audio;mp3;
+StartupNotify=true
+StartupWMClass=ams-yt-dw
