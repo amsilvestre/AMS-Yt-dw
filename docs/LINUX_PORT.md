@@ -361,14 +361,35 @@ estava ocupada. Lógica do guard testada localmente nos dois sentidos.
 O corpo da release ganhou a tabela de Linux e a explicação de por que yt-dlp e
 ffmpeg não vêm embutidos.
 
-### O que só a primeira execução vai dizer
+### Primeira execução — resultado
 
-- `libfontconfig-dev` é o nome certo no Ubuntu 22.04 (extrapolado do Fedora).
-- Se o `find-requires` do pacote `rpm` do Ubuntu é achado pelo
-  `cargo-generate-rpm`. Se não for, ele degrada para `auto-req` desabilitado e o
-  RPM sai sem as dependências de soname — as explícitas do `Cargo.toml`
-  continuam valendo.
-- O workflow **não foi executado**: validei só a sintaxe YAML e a lógica do guard.
+Rodou na tag `v1.3.0` (run `34167365068`, 07/09/2026). **Os quatro jobs passaram**;
+uma release única com os 5 artefatos foi publicada.
+
+| Job | Resultado | Duração |
+|---|---|---|
+| `check-version` | ✅ | 3 s |
+| `build-linux` | ✅ | 7 min 48 s |
+| `build-windows` | ✅ | 8 min 21 s |
+| `release` | ✅ | 14 s |
+
+As duas incógnitas que restavam, resolvidas:
+
+- **`libfontconfig-dev`** era o nome certo no Ubuntu 22.04 — e já vinha na imagem
+  do runner (`is already the newest version`).
+- **O `find-requires` foi encontrado.** O RPM publicado traz **28 dependências de
+  soname** além das explícitas, ou seja o `auto-req` funcionou de verdade e não
+  degradou.
+
+A escolha do `ubuntu-22.04` se pagou: o RPM exige no máximo `GLIBC_2.35`. Se
+tivesse sido buildado no `ubuntu-latest` (24.04) o piso subiria e excluiria
+distros mais antigas sem necessidade — para efeito de comparação, esta Fedora
+tem glibc 2.43.
+
+**Pendência nova:** o run emitiu avisos de que `actions/checkout@v4`,
+`actions/cache@v4`, `actions/upload-artifact@v4`, `actions/download-artifact@v4`
+e `softprops/action-gh-release@v2` ainda miram Node.js 20, que está depreciado e
+sendo forçado para o Node 24. Não quebra hoje; vai quebrar quando o suporte cair.
 
 ---
 
@@ -447,10 +468,11 @@ Registrado para não virar falsa sensação de cobertura:
 
 - **Instalar/desinstalar os pacotes** — o `.rpm` 1.1.0 foi instalado pelo usuário
   e o ícone apareceu certo, mas `.deb` e tarball não passaram por um ciclo
-  completo, e o RPM 1.3.0 é posterior a esse teste.
-- **O workflow do CI nunca rodou** — só a sintaxe YAML e a lógica do guard de
-  versão foram validadas.
-- **Nomes de pacotes Debian** — extrapolados do Fedora.
+  completo, e o RPM 1.3.0 publicado é posterior a esse teste.
+- **Nomes de pacotes Debian** — extrapolados do Fedora. O `libfontconfig-dev` do
+  build foi confirmado pelo CI, mas os `Depends` declarados no `.deb`
+  (`libegl1`, `libwayland-egl1`, …) só serão exercitados quando alguém instalar
+  o pacote num Debian/Ubuntu de verdade.
 - **Um download de verdade** pela UI: yt-dlp e ffmpeg estão instalados, mas
   nenhum download foi exercitado ponta a ponta.
 - **Clipboard da chave Pix** — a correção-âncora da Fase 1. Nunca foi feito o
